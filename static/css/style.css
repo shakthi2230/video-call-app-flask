@@ -1,0 +1,20 @@
+body {
+    margin: 0;
+    background-color: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+.video-container {
+    display: flex;
+    gap: 10px;
+}
+
+video {
+    width: 45vw;
+    height: 90vh;
+    background: #222;
+    border-radius: 10px;
+}

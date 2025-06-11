@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Room</title>
+    <style>
+        body {
+            background: #0f172a;
+            color: white;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin: 1rem;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #1e293b;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        #videos {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            padding: 10px;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            border: 2px solid #334155;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h2 style="text-align:center;">Live Video Room</h2>
+
+    <div id="controls">
+        <button id="toggleAudio">Mute Audio</button>
+        <button id="toggleVideo">Mute Video</button>
+    </div>
+
+    <div id="videos">
+        <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        const socket = io();
+        const room = window.location.pathname.split("/").pop();
+        const localVideo = document.getElementById("localVideo");
+        const peers = {};
+        let localStream;
+
+        // Buttons
+        const audioBtn = document.getElementById("toggleAudio");
+        const videoBtn = document.getElementById("toggleVideo");
+
+        let audioEnabled = true;
+        let videoEnabled = true;
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+            .then(stream => {
+                localStream = stream;
+                localVideo.srcObject = stream;
+                socket.emit("join", room);
+            });
+
+        socket.on("user-joined", socketId => {
+            const pc = createPeerConnection(socketId);
+            peers[socketId] = pc;
+
+            localStream.getTracks().forEach(track => {
+                pc.addTrack(track, localStream);
+            });
+        });
+
+        socket.on("offer", async (offer, fromId) => {
+            const pc = createPeerConnection(fromId);
+            peers[fromId] = pc;
+
+            await pc.setRemoteDescription(offer);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("answer", answer, fromId);
+        });
+
+        socket.on("answer", (answer, fromId) => {
+            peers[fromId].setRemoteDescription(answer);
+        });
+
+        socket.on("ice-candidate", (candidate, fromId) => {
+            peers[fromId].addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        socket.on("user-left", socketId => {
+            const video = document.getElementById(socketId);
+            if (video) video.remove();
+
+            if (peers[socketId]) {
+                peers[socketId].close();
+                delete peers[socketId];
+            }
+        });
+
+        function createPeerConnection(socketId) {
+            const pc = new RTCPeerConnection();
+
+            pc.onicecandidate = e => {
+                if (e.candidate) {
+                    socket.emit("ice-candidate", e.candidate, socketId);
+                }
+            };
+
+            pc.ontrack = e => {
+                let remoteVideo = document.getElementById(socketId);
+                if (!remoteVideo) {
+                    remoteVideo = document.createElement("video");
+                    remoteVideo.id = socketId;
+                    remoteVideo.autoplay = true;
+                    remoteVideo.playsInline = true;
+                    document.getElementById("videos").appendChild(remoteVideo);
+                }
+                remoteVideo.srcObject = e.streams[0];
+            };
+
+            pc.onnegotiationneeded = async () => {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit("offer", offer, socketId);
+            };
+
+            return pc;
+        }
+
+        // Audio toggle
+        audioBtn.addEventListener("click", () => {
+            audioEnabled = !audioEnabled;
+            localStream.getAudioTracks().forEach(track => {
+                track.enabled = audioEnabled;
+            });
+            audioBtn.textContent = audioEnabled ? "Mute Audio" : "Unmute Audio";
+        });
+
+        // Video toggle
+        videoBtn.addEventListener("click", () => {
+            videoEnabled = !videoEnabled;
+            localStream.getVideoTracks().forEach(track => {
+                track.enabled = videoEnabled;
+            });
+            videoBtn.textContent = videoEnabled ? "Mute Video" : "Unmute Video";
+        });
+    </script>
+</body>
+</html>
